@@ -1,0 +1,70 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    function isGroupMember(groupId) {
+      return isAuthenticated() && 
+        exists(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid));
+    }
+    
+    function isGroupAdmin(groupId) {
+      return isAuthenticated() && 
+        get(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid)).data.role == 'admin';
+    }
+
+    // User profiles
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && request.auth.uid == userId;
+      allow update: if isOwner(userId);
+      allow delete: if isOwner(userId);
+      
+      // User subscriptions
+      match /subscriptions/{subscriptionId} {
+        allow read: if isOwner(userId);
+        allow write: if isOwner(userId);
+      }
+    }
+
+    // Study groups
+    match /groups/{groupId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update: if isGroupAdmin(groupId);
+      allow delete: if isGroupAdmin(groupId);
+      
+      // Group members
+      match /members/{memberId} {
+        allow read: if isAuthenticated();
+        allow create: if isGroupAdmin(groupId);
+        allow update: if isGroupAdmin(groupId) || isOwner(memberId);
+        allow delete: if isGroupAdmin(groupId) || isOwner(memberId);
+      }
+      
+      // Group messages
+      match /messages/{messageId} {
+        allow read: if isGroupMember(groupId);
+        allow create: if isGroupMember(groupId);
+        allow update: if isGroupMember(groupId) && resource.data.userId == request.auth.uid;
+        allow delete: if isGroupAdmin(groupId) || (isGroupMember(groupId) && resource.data.userId == request.auth.uid);
+      }
+      
+      // Group resources
+      match /resources/{resourceId} {
+        allow read: if isGroupMember(groupId);
+        allow create: if isGroupMember(groupId);
+        allow update: if isGroupMember(groupId) && resource.data.userId == request.auth.uid;
+        allow delete: if isGroupAdmin(groupId) || (isGroupMember(groupId) && resource.data.userId == request.auth.uid);
+      }
+    }
+  }
+} 
